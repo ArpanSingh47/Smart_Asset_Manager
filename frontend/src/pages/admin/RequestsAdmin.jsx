@@ -106,17 +106,27 @@ export default function RequestsAdmin() {
   const parseCode = (raw) => {
     if (!raw) return ''
     let text = raw.trim()
+    if (text.includes('asset=') || text.includes('code=')) {
+      try {
+        const urlObj = new URL(text.startsWith('http') ? text : `http://localhost/${text}`)
+        const codeParam = urlObj.searchParams.get('asset') || urlObj.searchParams.get('code')
+        if (codeParam) return codeParam.trim()
+      } catch (_) {
+        const match = text.match(/(?:asset|code)=([^&]+)/)
+        if (match && match[1]) return decodeURIComponent(match[1]).trim()
+      }
+    }
     if (text.includes('/')) {
       const parts = text.split('/')
       text = parts[parts.length - 1]
-      if (text.endsWith('.png') || text.endsWith('.jpg') || text.endsWith('.webp')) {
+      if (text.endsWith('.png') || text.endsWith('.jpg') || text.endsWith('.jpeg') || text.endsWith('.webp')) {
         text = text.substring(0, text.lastIndexOf('.'))
       }
     }
     return text.trim()
   }
 
-  const handleScannedCode = (itemId, rawCode) => {
+  const handleScannedCode = (itemId, rawCode, silent = false) => {
     const code = parseCode(rawCode)
     if (!code) return
 
@@ -129,7 +139,9 @@ export default function RequestsAdmin() {
         return prev // Prevent duplicate scan spam
       }
 
-      toast.success(`Scanned: ${code}`)
+      if (!silent) {
+        toast.success(`Scanned: ${code}`)
+      }
       return {
         ...prev,
         items: prev.items.map(i => i.request_item_id === itemId ? {
@@ -138,6 +150,47 @@ export default function RequestsAdmin() {
         } : i)
       }
     })
+  }
+
+  const handleFilesUpload = async (itemId, fileList) => {
+    if (!fileList || fileList.length === 0) return
+    const files = Array.from(fileList)
+    if (scannerRef.current) {
+      await stopScanning()
+    }
+
+    const toastId = toast.loading(`Scanning ${files.length} QR image file${files.length > 1 ? 's' : ''}...`)
+    let addedCodes = []
+
+    for (const file of files) {
+      try {
+        const html5QrCode = new Html5Qrcode('qr-file-reader-hidden')
+        const decodedText = await html5QrCode.scanFile(file, false)
+        if (decodedText) {
+          const code = parseCode(decodedText)
+          if (code) {
+            handleScannedCode(itemId, code, true)
+            addedCodes.push(code)
+          }
+        }
+        try {
+          await html5QrCode.clear()
+        } catch (_) {}
+      } catch (err) {
+        console.warn(`File scan failed for ${file.name}:`, err)
+      }
+    }
+
+    if (addedCodes.length > 0) {
+      toast.success(
+        files.length === 1
+          ? `Scanned QR code: ${addedCodes[0]}`
+          : `Assigned ${addedCodes.length} QR code${addedCodes.length > 1 ? 's' : ''}: ${addedCodes.join(', ')}`,
+        { id: toastId }
+      )
+    } else {
+      toast.error('Could not detect a valid QR code in the selected file(s). Please ensure image is clear.', { id: toastId })
+    }
   }
 
   const addManualCode = (itemId) => {
@@ -338,15 +391,31 @@ export default function RequestsAdmin() {
 
                         {/* Dedicated "📷 Product QR Code" Section */}
                         {selected.status === 'pending' && (approval.status === 'approved' || approval.status === 'partially_approved') && approvedQty > 0 && (
-                          <div style={{
-                            marginTop: 12,
-                            padding: '12px 14px',
-                            background: 'var(--surface-2)',
-                            borderRadius: 8,
-                            border: '1px solid var(--border)'
-                          }}>
+                          <div
+                            onDragOver={e => e.preventDefault()}
+                            onDrop={e => {
+                              e.preventDefault()
+                              if (e.dataTransfer.files?.length) {
+                                handleFilesUpload(item.id, e.dataTransfer.files)
+                              }
+                            }}
+                            style={{
+                              marginTop: 12,
+                              padding: '12px 14px',
+                              background: 'var(--surface-2)',
+                              borderRadius: 8,
+                              border: '1px solid var(--border)'
+                            }}
+                          >
                             {/* Section Header */}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: 10,
+                              flexWrap: 'wrap',
+                              gap: 8
+                            }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ fontSize: 15 }}>📷</span>
                                 <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--primary)' }}>Product QR Code</span>
@@ -362,7 +431,7 @@ export default function RequestsAdmin() {
                                 </span>
                               </div>
 
-                              <div>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 {isScanning ? (
                                   <button
                                     type="button"
@@ -376,13 +445,43 @@ export default function RequestsAdmin() {
                                   <button
                                     type="button"
                                     className="btn btn-accent btn-sm"
-                                    style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                                    style={{ fontSize: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
                                     onClick={() => startScanning(item.id)}
+                                    title="Scan QR using camera feed"
                                   >
                                     <span>📷</span>
-                                    <span>Scan QR</span>
+                                    <span>Scan Camera</span>
                                   </button>
                                 )}
+
+                                <label
+                                  className="btn btn-outline btn-sm"
+                                  style={{
+                                    fontSize: 12,
+                                    padding: '4px 10px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    cursor: 'pointer',
+                                    margin: 0
+                                  }}
+                                  title="Upload QR image file (PNG, JPG, etc.)"
+                                >
+                                  <span>📁</span>
+                                  <span>Upload File</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                      if (e.target.files?.length) {
+                                        handleFilesUpload(item.id, e.target.files)
+                                        e.target.value = ''
+                                      }
+                                    }}
+                                  />
+                                </label>
                               </div>
                             </div>
 
@@ -403,13 +502,13 @@ export default function RequestsAdmin() {
                               </div>
                             )}
 
-                            {/* Manual Entry (+ Add) for Barcode Guns & Copy-Pasting */}
+                            {/* Manual Entry (+ Add) & Drop Hint */}
                             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                               <input
                                 type="text"
                                 className="form-input"
                                 style={{ flex: 1, padding: '6px 12px', fontSize: 13 }}
-                                placeholder="Type or scan barcode (e.g. AUD-001)..."
+                                placeholder="Type/paste code (e.g. AUD-001) or drag & drop QR image file..."
                                 value={manualInputs[item.id] || ''}
                                 onChange={e => setManualInputs({ ...manualInputs, [item.id]: e.target.value })}
                                 onKeyDown={e => {
@@ -523,6 +622,21 @@ export default function RequestsAdmin() {
           </div>
         </div>
       )}
+
+      {/* Hidden container for Html5Qrcode file scan processing */}
+      <div
+        id="qr-file-reader-hidden"
+        style={{
+          position: 'fixed',
+          top: -9999,
+          left: -9999,
+          width: 320,
+          height: 320,
+          opacity: 0,
+          pointerEvents: 'none',
+          zIndex: -1
+        }}
+      />
     </div>
   )
 }
