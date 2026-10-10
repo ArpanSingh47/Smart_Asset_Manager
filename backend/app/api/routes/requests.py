@@ -155,6 +155,7 @@ def review_request(
 
     req.status = RequestStatus(approval.status)
     req.admin_notes = approval.admin_notes
+    allocated_summary_list = []
 
     # Update item quantities and process scanned asset codes
     for item_approval in approval.items:
@@ -217,12 +218,24 @@ def review_request(
 
                 asset.status = AssetStatus.in_use
 
-    # Notify user
+                # Audit log entry for allocated asset
+                _log_alloc = AuditLog(
+                    action="asset_allocated",
+                    performed_by=admin.id,
+                    entity_type="asset",
+                    entity_id=asset.id,
+                    details={"request_id": req.id, "event_name": req.event_name, "asset_code": asset.asset_code}
+                )
+                db.add(_log_alloc)
+                allocated_summary_list.append(f"{asset.name} ({asset.asset_code})")
+
+    # Notify user with full allocation details
     user = db.query(User).filter(User.id == req.user_id).first()
+    alloc_details = f" Allocated items: {', '.join(allocated_summary_list)}." if allocated_summary_list else ""
     n = Notification(
         user_id=user.id,
         title=f"Request {approval.status.title()}",
-        message=f"Your request for '{req.event_name}' has been {approval.status}. {approval.admin_notes or ''}",
+        message=f"Your request for '{req.event_name}' has been {approval.status}.{alloc_details} {approval.admin_notes or ''}".strip(),
         type="success" if approval.status == "approved" else "error" if approval.status == "rejected" else "warning"
     )
     db.add(n)

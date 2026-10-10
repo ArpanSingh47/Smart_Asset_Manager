@@ -35,6 +35,7 @@ export default function AssetsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [showQRModal, setShowQRModal] = useState(false)
+  const [viewQrAsset, setViewQrAsset] = useState(null)
   const [selectedIds, setSelectedIds] = useState([])
   const [qrConfig, setQrConfig] = useState({ cols: 3, rows: 4, include_name: true, include_id: true, include_category: true, scope: 'selected' })
   const [form, setForm] = useState({ name: '', category: '', description: '', condition: 'good' })
@@ -282,11 +283,14 @@ export default function AssetsPage() {
                     </div>
                   </td>
                   <td>
-                    {a.qr_code_url && (
-                      <a href={`http://localhost:8000${a.qr_code_url}`} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                        🔗 View QR
-                      </a>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setViewQrAsset(a)}
+                      className="btn btn-ghost btn-sm"
+                      title="View QR Code Preview"
+                    >
+                      👁️ View QR
+                    </button>
                   </td>
                   <td>
                     <button onClick={() => { setSelectedIds([a.id]); setQrConfig(c => ({ ...c, scope: 'selected' })); setShowQRModal(true) }}
@@ -452,6 +456,117 @@ export default function AssetsPage() {
               <button className="btn btn-primary" onClick={downloadQRPdf} disabled={loading}>
                 {loading ? <><span className="spinner"/> Generating...</> : '📄 Download PDF'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive QR Preview & Download Modal */}
+      {viewQrAsset && (
+        <div className="modal-overlay" onClick={() => setViewQrAsset(null)}>
+          <div className="modal" style={{ maxWidth: 440, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">QR Code Preview</span>
+              <button className="btn btn-ghost btn-icon" onClick={() => setViewQrAsset(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+              <div>
+                <h4 style={{ margin: 0, fontWeight: 700, fontSize: 17 }}>{viewQrAsset.name}</h4>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 6 }}>
+                  <code style={{ fontSize: 14, background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
+                    {viewQrAsset.asset_code}
+                  </code>
+                  <span className="badge badge-pending">{viewQrAsset.category}</span>
+                </div>
+              </div>
+
+              {/* QR Image Container with fallback */}
+              <div style={{
+                background: '#ffffff',
+                padding: 16,
+                borderRadius: 12,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid var(--border)'
+              }}>
+                <img
+                  src={viewQrAsset.qr_code_url ? `http://localhost:8000${viewQrAsset.qr_code_url}` : `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(viewQrAsset.asset_code)}`}
+                  alt={`QR for ${viewQrAsset.asset_code}`}
+                  style={{ width: 220, height: 220, objectFit: 'contain', display: 'block' }}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null
+                    e.currentTarget.src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(viewQrAsset.asset_code)}`
+                  }}
+                />
+              </div>
+
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+                Scan with any standard QR reader or mobile camera to look up this asset.
+              </p>
+
+              {/* Action Buttons: Copy Code, Download PNG, Print Label */}
+              <div style={{ display: 'flex', gap: 10, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(viewQrAsset.asset_code)
+                    toast.success(`Copied asset code: ${viewQrAsset.asset_code}`)
+                  }}
+                >
+                  📋 Copy Code
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={async () => {
+                    try {
+                      const qrUrl = viewQrAsset.qr_code_url
+                        ? `http://localhost:8000${viewQrAsset.qr_code_url}`
+                        : `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(viewQrAsset.asset_code)}`
+                      const res = await fetch(qrUrl)
+                      const blob = await res.blob()
+                      const blobUrl = URL.createObjectURL(blob)
+                      const link = document.createElement('a')
+                      link.href = blobUrl
+                      link.download = `${viewQrAsset.asset_code}_qr.png`
+                      document.body.appendChild(link)
+                      link.click()
+                      document.body.removeChild(link)
+                      URL.revokeObjectURL(blobUrl)
+                      toast.success(`Downloaded ${viewQrAsset.asset_code}_qr.png`)
+                    } catch (err) {
+                      const link = document.createElement('a')
+                      link.href = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(viewQrAsset.asset_code)}`
+                      link.download = `${viewQrAsset.asset_code}_qr.png`
+                      link.target = '_blank'
+                      link.click()
+                      toast.success('Downloading QR code PNG...')
+                    }
+                  }}
+                >
+                  📥 Download PNG
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setSelectedIds([viewQrAsset.id])
+                    setQrConfig(c => ({ ...c, scope: 'selected' }))
+                    setShowQRModal(true)
+                    setViewQrAsset(null)
+                  }}
+                >
+                  🏷️ Print Label
+                </button>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ justifyContent: 'center' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => setViewQrAsset(null)}>Close</button>
             </div>
           </div>
         </div>
