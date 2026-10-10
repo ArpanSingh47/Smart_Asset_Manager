@@ -49,6 +49,14 @@ def get_db_context(db: Session) -> str:
     cats = db.query(Asset.category, func.count(Asset.id)).group_by(Asset.category).all()
     cat_text = ", ".join([f"{c[0]}: {c[1]}" for c in cats])
 
+    # Equipment Catalog breakdown (Base items and unit counts)
+    item_counts = {}
+    for a in db.query(Asset).order_by(Asset.category, Asset.name).all():
+        base = a.name.split(" #")[0] if " #" in a.name else a.name
+        key = f"{base} [{a.category}]"
+        item_counts[key] = item_counts.get(key, 0) + 1
+    catalog_lines = "\n".join([f"  - {k}: {v} units" for k, v in item_counts.items()])
+
     return f"""DATABASE SUMMARY (Live from Smart Asset Manager DB):
 - Total Assets: {total_assets}
   - Available: {available}
@@ -56,6 +64,8 @@ def get_db_context(db: Session) -> str:
   - Maintenance: {maintenance}
   - Retired: {retired}
 - Asset Categories: {cat_text}
+- Catalog Stock by Item (3 units each):
+{catalog_lines}
 - Total Requests: {total_requests} (Pending review: {pending}, Approved: {approved})
 - Total Allocations: {total_allocations} (Active allocated: {active_alloc}, Overdue / Flagged: {overdue})
 - Registered Users: {total_users}

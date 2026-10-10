@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import api from '../../services/api'
 import { toast } from 'react-hot-toast'
 
-const CATEGORIES = ['Audio', 'Lighting', 'Furniture', 'AV Equipment', 'Sports', 'IT Equipment', 'Stage', 'Other']
+const CATEGORIES = ['Audio', 'Lighting', 'Electrical', 'AV Equipment', 'Furniture', 'Stage', 'Sports', 'IT Equipment', 'Other']
 
 const CalendarIcon = ({ size = 14, color = 'currentColor' }) => (
   <svg
