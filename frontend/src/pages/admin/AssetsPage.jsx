@@ -41,6 +41,7 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const fileRef = useRef()
+  const dateInputRef = useRef(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['assets', search, catFilter, statusFilter, sortBy, dateFilter, customDate],
@@ -176,13 +177,51 @@ export default function AssetsPage() {
               <CalendarIcon size={13} color="var(--primary)" />
               FILTER BY DATE ADDED
             </label>
-            <select className="form-select" value={dateFilter} onChange={e => setDateFilter(e.target.value)}>
+            <select
+              className="form-select"
+              value={dateFilter}
+              onChange={e => {
+                const val = e.target.value
+                setDateFilter(val)
+                if (val === 'custom') {
+                  setTimeout(() => {
+                    dateInputRef.current?.focus()
+                    dateInputRef.current?.showPicker?.()
+                  }, 60)
+                }
+              }}
+            >
               <option value="">All Dates Added</option>
               <option value="today">Added Today</option>
               <option value="7days">Added Last 7 Days</option>
               <option value="30days">Added Last 30 Days</option>
               <option value="custom">Specific Date...</option>
             </select>
+
+            {dateFilter === 'custom' && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  ref={dateInputRef}
+                  type="date"
+                  className="form-input"
+                  style={{ flex: 1, padding: '7px 10px', fontSize: 13, cursor: 'pointer' }}
+                  value={customDate}
+                  onClick={e => e.target.showPicker?.()}
+                  onChange={e => setCustomDate(e.target.value)}
+                />
+                {customDate && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    title="Clear selected date"
+                    style={{ padding: '6px 8px', fontSize: 12, flexShrink: 0 }}
+                    onClick={() => setCustomDate('')}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -197,31 +236,6 @@ export default function AssetsPage() {
             </select>
           </div>
         </div>
-
-        {dateFilter === 'custom' && (
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <CalendarIcon size={14} color="var(--primary)" />
-              Select Date Asset Was Added:
-            </span>
-            <input 
-              type="date" 
-              className="form-input" 
-              style={{ width: 190 }} 
-              value={customDate} 
-              onChange={e => setCustomDate(e.target.value)} 
-            />
-            {customDate && (
-              <button 
-                type="button" 
-                className="btn btn-ghost btn-sm" 
-                onClick={() => setCustomDate('')}
-              >
-                Clear Date
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Table */}
