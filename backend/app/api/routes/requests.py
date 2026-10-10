@@ -6,10 +6,19 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_admin
 from app.models.user import (Request, RequestItem, RequestStatus, Venue, Asset,
-                              AssetStatus, Notification, AuditLog, User)
+                              AssetStatus, Allocation, AllocationStatus,
+                              Notification, AuditLog, User)
 from app.services.email_service import send_request_status_email
+from app.services.qr_service import generate_qr_code
+import re
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
+
+
+def _make_code(category: str, db: Session) -> str:
+    prefix = re.sub(r'[^A-Z]', '', (category or "AST").upper())[:3] or "AST"
+    count = db.query(Asset).filter(Asset.category == category).count() + 1
+    return f"{prefix}-{count:03d}"
 
 
 class RequestItemIn(BaseModel):
@@ -34,6 +43,7 @@ class RequestCreate(BaseModel):
 class ApprovalItem(BaseModel):
     request_item_id: int
     quantity_approved: int
+    asset_codes: List[str] = []
 
 
 class ApprovalRequest(BaseModel):
@@ -146,11 +156,66 @@ def review_request(
     req.status = RequestStatus(approval.status)
     req.admin_notes = approval.admin_notes
 
-    # Update item quantities
+    # Update item quantities and process scanned asset codes
     for item_approval in approval.items:
         ri = db.query(RequestItem).filter(RequestItem.id == item_approval.request_item_id).first()
         if ri:
             ri.quantity_approved = item_approval.quantity_approved
+
+        # Process each scanned QR asset code for this approved item
+        if approval.status in ["approved", "partially_approved"] and item_approval.asset_codes:
+            for code_raw in item_approval.asset_codes:
+                code = code_raw.strip()
+                if not code:
+                    continue
+
+                # Find or register asset so it appears in the assets page
+                asset = db.query(Asset).filter(Asset.asset_code == code).first()
+                if not asset:
+                    # Auto-register newly scanned asset into inventory
+                    item_name = ri.item_name if ri else "Asset"
+                    item_cat = (ri.category if ri and ri.category else "Other")
+                    asset = Asset(
+                        asset_code=code,
+                        name=f"{item_name} [{code}]",
+                        category=item_cat,
+                        description=f"Registered upon request approval for #{req.id} ({req.event_name})",
+                        status=AssetStatus.available
+                    )
+                    db.add(asset)
+                    db.flush()
+                    try:
+                        qr_url = generate_qr_code(asset.asset_code, asset.name)
+                        asset.qr_code_url = qr_url
+                    except Exception:
+                        pass
+                    _log_asset = AuditLog(action="asset_created", performed_by=admin.id,
+                                          entity_type="asset", entity_id=asset.id,
+                                          details={"name": asset.name, "code": asset.asset_code})
+                    db.add(_log_asset)
+
+                # Link item to asset if not linked
+                if ri and not ri.asset_id:
+                    ri.asset_id = asset.id
+
+                # Create allocation for this request
+                due = req.expected_return_date or (req.event_date + timedelta(days=1) if req.event_date else None)
+                existing_alloc = db.query(Allocation).filter(
+                    Allocation.request_id == req.id,
+                    Allocation.asset_id == asset.id
+                ).first()
+
+                if not existing_alloc:
+                    alloc = Allocation(
+                        request_id=req.id,
+                        asset_id=asset.id,
+                        allocated_by=admin.id,
+                        due_date=due,
+                        status=AllocationStatus.allocated
+                    )
+                    db.add(alloc)
+
+                asset.status = AssetStatus.in_use
 
     # Notify user
     user = db.query(User).filter(User.id == req.user_id).first()

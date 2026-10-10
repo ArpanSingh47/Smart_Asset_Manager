@@ -22,7 +22,7 @@ export default function RequestsAdmin() {
     setApproval({
       status: 'approved',
       admin_notes: '',
-      items: data.items.map(i => ({ request_item_id: i.id, quantity_approved: i.quantity_requested }))
+      items: data.items.map(i => ({ request_item_id: i.id, quantity_approved: i.quantity_requested, asset_codes: [] }))
     })
   }
 
@@ -33,6 +33,7 @@ export default function RequestsAdmin() {
       toast.success(`Request ${approval.status}!`)
       setSelected(null)
       qc.invalidateQueries(['admin-requests'])
+      qc.invalidateQueries(['assets'])
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed') }
     finally { setLoading(false) }
   }
@@ -41,6 +42,14 @@ export default function RequestsAdmin() {
     setApproval(a => ({
       ...a,
       items: a.items.map(i => i.request_item_id === id ? { ...i, quantity_approved: qty } : i)
+    }))
+  }
+
+  const updateItemCodes = (id, str) => {
+    const codes = str.split(',').map(s => s.trim()).filter(Boolean)
+    setApproval(a => ({
+      ...a,
+      items: a.items.map(i => i.request_item_id === id ? { ...i, asset_codes: codes } : i)
     }))
   }
 
@@ -123,21 +132,36 @@ export default function RequestsAdmin() {
                 <label className="form-label">Requested Items</label>
                 <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                   {selected.items.map(item => (
-                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', gap: 12 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{item.item_name}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.category}{item.notes ? ` · ${item.notes}` : ''}</div>
-                        {item.is_other && <span className="badge badge-warning" style={{ fontSize: 10 }}>Custom item</span>}
+                    <div key={item.id} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600 }}>{item.item_name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.category}{item.notes ? ` · ${item.notes}` : ''}</div>
+                          {item.is_other && <span className="badge badge-warning" style={{ fontSize: 10 }}>Custom item</span>}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Requested: <strong>{item.quantity_requested}</strong></div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 13 }}>Approve:</span>
+                          <input type="number" min={0} max={item.quantity_requested}
+                            className="form-input" style={{ width: 70 }}
+                            value={approval.items.find(i => i.request_item_id === item.id)?.quantity_approved ?? item.quantity_requested}
+                            onChange={e => updateItemQty(item.id, parseInt(e.target.value))}
+                          />
+                        </div>
                       </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Requested: <strong>{item.quantity_requested}</strong></div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 13 }}>Approve:</span>
-                        <input type="number" min={0} max={item.quantity_requested}
-                          className="form-input" style={{ width: 70 }}
-                          value={approval.items.find(i => i.request_item_id === item.id)?.quantity_approved ?? item.quantity_requested}
-                          onChange={e => updateItemQty(item.id, parseInt(e.target.value))}
-                        />
-                      </div>
+                      {selected.status === 'pending' && (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Assign Asset Codes:</span>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ fontSize: 12, padding: '4px 8px' }}
+                            placeholder="e.g. AUD-001, AUD-002 (comma-separated or scan)"
+                            value={approval.items.find(i => i.request_item_id === item.id)?.asset_codes?.join(', ') || ''}
+                            onChange={e => updateItemCodes(item.id, e.target.value)}
+                          />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
