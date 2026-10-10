@@ -1,4 +1,5 @@
 import io, os, pandas as pd
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
@@ -36,6 +37,10 @@ def list_assets(
     category: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
+    sort_by: Optional[str] = "created_desc",
+    date_filter: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     skip: int = 0, limit: int = 100,
     db: Session = Depends(get_db),
     _=Depends(get_current_admin)
@@ -47,6 +52,44 @@ def list_assets(
         q = q.filter(Asset.status == status)
     if search:
         q = q.filter(Asset.name.ilike(f"%{search}%") | Asset.asset_code.ilike(f"%{search}%"))
+
+    now = datetime.utcnow()
+    if date_filter == "today":
+        start_of_today = datetime(now.year, now.month, now.day)
+        q = q.filter(Asset.created_at >= start_of_today)
+    elif date_filter == "7days":
+        q = q.filter(Asset.created_at >= now - timedelta(days=7))
+    elif date_filter == "30days":
+        q = q.filter(Asset.created_at >= now - timedelta(days=30))
+    elif date_filter == "custom" or date_from or date_to:
+        if date_from:
+            try:
+                df = datetime.fromisoformat(date_from)
+                q = q.filter(Asset.created_at >= df)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                dt = datetime.fromisoformat(date_to) + timedelta(days=1)
+                q = q.filter(Asset.created_at < dt)
+            except ValueError:
+                pass
+
+    if sort_by == "created_asc":
+        q = q.order_by(Asset.created_at.asc(), Asset.id.asc())
+    elif sort_by == "created_desc":
+        q = q.order_by(Asset.created_at.desc(), Asset.id.desc())
+    elif sort_by == "name_asc":
+        q = q.order_by(Asset.name.asc())
+    elif sort_by == "name_desc":
+        q = q.order_by(Asset.name.desc())
+    elif sort_by == "code_asc":
+        q = q.order_by(Asset.asset_code.asc())
+    elif sort_by == "code_desc":
+        q = q.order_by(Asset.asset_code.desc())
+    else:
+        q = q.order_by(Asset.created_at.desc(), Asset.id.desc())
+
     total = q.count()
     assets = q.offset(skip).limit(limit).all()
     return {"total": total, "assets": [_asset_dict(a) for a in assets]}

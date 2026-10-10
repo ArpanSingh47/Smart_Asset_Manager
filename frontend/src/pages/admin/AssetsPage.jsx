@@ -10,6 +10,9 @@ export default function AssetsPage() {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [sortBy, setSortBy] = useState('created_desc')
+  const [dateFilter, setDateFilter] = useState('')
+  const [customDate, setCustomDate] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [showQRModal, setShowQRModal] = useState(false)
@@ -21,8 +24,20 @@ export default function AssetsPage() {
   const fileRef = useRef()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['assets', search, catFilter, statusFilter],
-    queryFn: () => api.get(`/api/assets?search=${search}&category=${catFilter}&status=${statusFilter}`).then(r => r.data),
+    queryKey: ['assets', search, catFilter, statusFilter, sortBy, dateFilter, customDate],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (search) params.append('search', search)
+      if (catFilter) params.append('category', catFilter)
+      if (statusFilter) params.append('status', statusFilter)
+      if (sortBy) params.append('sort_by', sortBy)
+      if (dateFilter) params.append('date_filter', dateFilter)
+      if (dateFilter === 'custom' && customDate) {
+        params.append('date_from', customDate)
+        params.append('date_to', customDate)
+      }
+      return api.get(`/api/assets?${params.toString()}`).then(r => r.data)
+    },
   })
 
   const handleAdd = async (e) => {
@@ -110,22 +125,78 @@ export default function AssetsPage() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters and Sorting */}
       <div className="card card-pad mb-4">
-        <div className="form-row-3">
-          <input className="form-input" placeholder="🔍 Search assets..." value={search} onChange={e => setSearch(e.target.value)} />
-          <select className="form-select" value={catFilter} onChange={e => setCatFilter(e.target.value)}>
-            <option value="">All Categories</option>
-            {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-          </select>
-          <select className="form-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-            <option value="">All Statuses</option>
-            <option value="available">Available</option>
-            <option value="in_use">In Use</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="retired">Retired</option>
-          </select>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>SEARCH</label>
+            <input className="form-input" placeholder="🔍 Search name or code..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>CATEGORY</label>
+            <select className="form-select" value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+              <option value="">All Categories</option>
+              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>STATUS</label>
+            <select className="form-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="">All Statuses</option>
+              <option value="available">Available</option>
+              <option value="in_use">In Use</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="retired">Retired</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>FILTER BY DATE ADDED</label>
+            <select className="form-select" value={dateFilter} onChange={e => setDateFilter(e.target.value)}>
+              <option value="">📅 All Dates Added</option>
+              <option value="today">Added Today</option>
+              <option value="7days">Added Last 7 Days</option>
+              <option value="30days">Added Last 30 Days</option>
+              <option value="custom">Specific Date...</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>SORT BY</label>
+            <select className="form-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="created_desc">⏱️ Date Added: Newest First</option>
+              <option value="created_asc">⏱️ Date Added: Oldest First</option>
+              <option value="name_asc">🔤 Name: A → Z</option>
+              <option value="name_desc">🔤 Name: Z → A</option>
+              <option value="code_asc">🏷️ Asset Code: A → Z</option>
+              <option value="code_desc">🏷️ Asset Code: Z → A</option>
+            </select>
+          </div>
         </div>
+
+        {dateFilter === 'custom' && (
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>Select Date Asset Was Added:</span>
+            <input 
+              type="date" 
+              className="form-input" 
+              style={{ width: 190 }} 
+              value={customDate} 
+              onChange={e => setCustomDate(e.target.value)} 
+            />
+            {customDate && (
+              <button 
+                type="button" 
+                className="btn btn-ghost btn-sm" 
+                onClick={() => setCustomDate('')}
+              >
+                Clear Date
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -135,11 +206,18 @@ export default function AssetsPage() {
             <thead>
               <tr>
                 <th><input type="checkbox" onChange={e => setSelectedIds(e.target.checked ? data.assets.map(a => a.id) : [])} /></th>
-                <th>Asset Code</th>
-                <th>Name</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSortBy(s => s === 'code_asc' ? 'code_desc' : 'code_asc')}>
+                  Asset Code {sortBy === 'code_asc' ? '▲' : sortBy === 'code_desc' ? '▼' : ''}
+                </th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSortBy(s => s === 'name_asc' ? 'name_desc' : 'name_asc')}>
+                  Name {sortBy === 'name_asc' ? '▲' : sortBy === 'name_desc' ? '▼' : ''}
+                </th>
                 <th>Category</th>
                 <th>Status</th>
                 <th>Condition</th>
+                <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSortBy(s => s === 'created_desc' ? 'created_asc' : 'created_desc')}>
+                  Date Added {sortBy === 'created_desc' ? '▼' : sortBy === 'created_asc' ? '▲' : '⇅'}
+                </th>
                 <th>QR</th>
                 <th>Actions</th>
               </tr>
@@ -154,6 +232,14 @@ export default function AssetsPage() {
                   <td><span className={`badge badge-${a.status}`}>{a.status?.replace('_', ' ')}</span></td>
                   <td><span className="badge badge-available">{a.condition}</span></td>
                   <td>
+                    <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      {a.created_at ? new Date(a.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {a.created_at ? new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </div>
+                  </td>
+                  <td>
                     {a.qr_code_url && (
                       <a href={`http://localhost:8000${a.qr_code_url}`} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
                         🔗 View QR
@@ -166,7 +252,7 @@ export default function AssetsPage() {
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan={8}><div className="empty-state"><p>No assets found</p></div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state"><p>No assets found</p></div></td></tr>
               )}
             </tbody>
           </table>
