@@ -118,12 +118,18 @@ def ask_sammy(question: str, db: Session) -> str:
             context = get_db_context(db)
             client = genai.Client(api_key=api_key)
             prompt = f"{SYSTEM_PROMPT}\n\n{context}\n\nUser Question: {question}"
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt
-            )
-            if response and response.text:
-                return response.text
+            # Try gemini-3.8-flash first, then fallback models if needed
+            for model_name in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
+                    if response and response.text:
+                        return response.text
+                except Exception as model_err:
+                    logger.debug(f"Model {model_name} failed: {model_err}")
+                    continue
         except Exception as e:
             logger.warning(f"Gemini API request failed, falling back to local reasoning: {e}")
 
