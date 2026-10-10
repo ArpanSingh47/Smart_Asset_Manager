@@ -9,11 +9,28 @@ from app.models.user import (
 )
 from app.services.qr_service import generate_qr_code
 
+def sync_venues(db: Session):
+    venues_data = [
+        {"name": "Virangana Rani LaxmiBai Auditorium", "capacity": 1200, "location": "Auditorium Complex", "facilities": ["Full Stage Lighting", "Acoustic Panels", "Central AC", "Green Rooms", "Dual Projectors"]},
+        {"name": "Cenate Hall", "capacity": 300, "location": "Administrative Block", "facilities": ["Smart Podium", "Video Conferencing", "Surround Sound", "Central AC"]},
+        {"name": "Lecture Hall Complex L1 UIET", "capacity": 150, "location": "LHC Ground Floor, UIET", "facilities": ["Interactive Projector", "PA System", "Tiered Seating", "AC"]},
+        {"name": "Open Air Theatre UIET", "capacity": 800, "location": "UIET Campus Lawns", "facilities": ["Open Stage", "Floodlights", "High-power Audio Ports"]},
+        {"name": "Conferrence Room CSE-AI Building UIET", "capacity": 50, "location": "CSE-AI Building, 1st Floor, UIET", "facilities": ["Conference Table", "Video Conferencing Screen", "Mic per seat", "AC"]},
+        {"name": "Seminar Room UIET 4", "capacity": 80, "location": "UIET Academic Block 4", "facilities": ["Smart Board", "Projector", "Sound System", "AC"]},
+        {"name": "Lecture Hall SBM", "capacity": 120, "location": "School of Business Management (SBM)", "facilities": ["Audio Visual Setup", "Podium Mic", "Projector Screen", "AC"]}
+    ]
+    for vd in venues_data:
+        existing = db.query(Venue).filter(Venue.name == vd["name"]).first()
+        if not existing:
+            db.add(Venue(name=vd["name"], capacity=vd["capacity"], location=vd["location"], facilities=vd["facilities"], is_active=True))
+    db.commit()
+
 def seed():
     Base.metadata.create_all(bind=engine)
     db: Session = SessionLocal()
 
     try:
+        sync_venues(db)
         # Check if already seeded
         if db.query(User).filter(User.email == "admin@smartasset.edu").first():
             print("Database already contains seed data.")
@@ -64,28 +81,46 @@ def seed():
         # 4. Venues (Non-portable resources)
         venues_data = [
             {
-                "name": "Main University Auditorium",
+                "name": "Virangana Rani LaxmiBai Auditorium",
                 "capacity": 1200,
-                "location": "Central Academic Block, Ground Floor",
+                "location": "Auditorium Complex",
                 "facilities": ["Full Stage Lighting", "Acoustic Panels", "Central AC", "Green Rooms", "Dual Projectors"]
             },
             {
-                "name": "Sir C.V. Raman Seminar Hall",
-                "capacity": 250,
-                "location": "Science Block B, 2nd Floor",
-                "facilities": ["Smart Podium", "Video Conferencing", "Surround Sound"]
+                "name": "Cenate Hall",
+                "capacity": 300,
+                "location": "Administrative Block",
+                "facilities": ["Smart Podium", "Video Conferencing", "Surround Sound", "Central AC"]
             },
             {
-                "name": "Open Air Amphitheatre",
+                "name": "Lecture Hall Complex L1 UIET",
+                "capacity": 150,
+                "location": "LHC Ground Floor, UIET",
+                "facilities": ["Interactive Projector", "PA System", "Tiered Seating", "AC"]
+            },
+            {
+                "name": "Open Air Theatre UIET",
                 "capacity": 800,
-                "location": "Student Activity Center Lawn",
+                "location": "UIET Campus Lawns",
                 "facilities": ["Open Stage", "Floodlights", "High-power Audio Ports"]
             },
             {
-                "name": "Executive Council Room",
-                "capacity": 45,
-                "location": "Administrative Building, 1st Floor",
-                "facilities": ["U-Shape Seating", "Motorized Screen", "Mic per seat"]
+                "name": "Conferrence Room CSE-AI Building UIET",
+                "capacity": 50,
+                "location": "CSE-AI Building, 1st Floor, UIET",
+                "facilities": ["Conference Table", "Video Conferencing Screen", "Mic per seat", "AC"]
+            },
+            {
+                "name": "Seminar Room UIET 4",
+                "capacity": 80,
+                "location": "UIET Academic Block 4",
+                "facilities": ["Smart Board", "Projector", "Sound System", "AC"]
+            },
+            {
+                "name": "Lecture Hall SBM",
+                "capacity": 120,
+                "location": "School of Business Management (SBM)",
+                "facilities": ["Audio Visual Setup", "Podium Mic", "Projector Screen", "AC"]
             }
         ]
 

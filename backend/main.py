@@ -21,8 +21,9 @@ os.makedirs("static/qr_codes", exist_ok=True)
 try:
     from app.core.database import SessionLocal
     from app.models.user import User
-    from seed_data import seed
+    from seed_data import seed, sync_venues
     with SessionLocal() as _db:
+        sync_venues(_db)
         if _db.query(User).count() == 0:
             seed()
 except Exception as _e:
