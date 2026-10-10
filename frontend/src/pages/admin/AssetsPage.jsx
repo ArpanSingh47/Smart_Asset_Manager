@@ -5,6 +5,25 @@ import { toast } from 'react-hot-toast'
 
 const CATEGORIES = ['Audio', 'Lighting', 'Furniture', 'AV Equipment', 'Sports', 'IT Equipment', 'Stage', 'Other']
 
+const CalendarIcon = ({ size = 14, color = 'currentColor' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ verticalAlign: 'middle', flexShrink: 0 }}
+  >
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+)
+
 export default function AssetsPage() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
@@ -130,7 +149,7 @@ export default function AssetsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
           <div>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>SEARCH</label>
-            <input className="form-input" placeholder="🔍 Search name or code..." value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="form-input" placeholder="Search name or code..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
 
           <div>
@@ -153,9 +172,12 @@ export default function AssetsPage() {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>FILTER BY DATE ADDED</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+              <CalendarIcon size={13} color="var(--primary)" />
+              FILTER BY DATE ADDED
+            </label>
             <select className="form-select" value={dateFilter} onChange={e => setDateFilter(e.target.value)}>
-              <option value="">📅 All Dates Added</option>
+              <option value="">All Dates Added</option>
               <option value="today">Added Today</option>
               <option value="7days">Added Last 7 Days</option>
               <option value="30days">Added Last 30 Days</option>
@@ -166,19 +188,22 @@ export default function AssetsPage() {
           <div>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>SORT BY</label>
             <select className="form-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              <option value="created_desc">⏱️ Date Added: Newest First</option>
-              <option value="created_asc">⏱️ Date Added: Oldest First</option>
-              <option value="name_asc">🔤 Name: A → Z</option>
-              <option value="name_desc">🔤 Name: Z → A</option>
-              <option value="code_asc">🏷️ Asset Code: A → Z</option>
-              <option value="code_desc">🏷️ Asset Code: Z → A</option>
+              <option value="created_desc">Date Added: Newest First</option>
+              <option value="created_asc">Date Added: Oldest First</option>
+              <option value="name_asc">Name: A → Z</option>
+              <option value="name_desc">Name: Z → A</option>
+              <option value="code_asc">Asset Code: A → Z</option>
+              <option value="code_desc">Asset Code: Z → A</option>
             </select>
           </div>
         </div>
 
         {dateFilter === 'custom' && (
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>Select Date Asset Was Added:</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CalendarIcon size={14} color="var(--primary)" />
+              Select Date Asset Was Added:
+            </span>
             <input 
               type="date" 
               className="form-input" 
@@ -216,7 +241,10 @@ export default function AssetsPage() {
                 <th>Status</th>
                 <th>Condition</th>
                 <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSortBy(s => s === 'created_desc' ? 'created_asc' : 'created_desc')}>
-                  Date Added {sortBy === 'created_desc' ? '▼' : sortBy === 'created_asc' ? '▲' : '⇅'}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <CalendarIcon size={13} color="var(--primary)" />
+                    Date Added {sortBy === 'created_desc' ? '▼' : sortBy === 'created_asc' ? '▲' : '⇅'}
+                  </span>
                 </th>
                 <th>QR</th>
                 <th>Actions</th>
