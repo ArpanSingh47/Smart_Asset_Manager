@@ -13,6 +13,7 @@ export default function RequestsAdmin() {
   const [scanningItemId, setScanningItemId] = useState(null)
   const [loading, setLoading] = useState(false)
   const scannerRef = useRef(null)
+  const scanCooldownRef = useRef({ code: '', time: 0 })
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-requests', statusFilter],
@@ -55,7 +56,7 @@ export default function RequestsAdmin() {
       admin_notes: '',
       items: data.items.map(i => ({
         request_item_id: i.id,
-        quantity_approved: i.quantity_requested,
+        quantity_approved: 0, // starts at 0; strictly updated when QR codes are scanned!
         asset_codes: []
       }))
     })
@@ -85,9 +86,9 @@ export default function RequestsAdmin() {
         await qrScanner.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 },
-          (decodedText) => {
+          async (decodedText) => {
             if (decodedText) {
-              handleScannedCode(itemId, decodedText)
+              await handleScannedCode(itemId, decodedText)
             }
           },
           () => {
@@ -126,9 +127,61 @@ export default function RequestsAdmin() {
     return text.trim()
   }
 
-  const handleScannedCode = (itemId, rawCode, silent = false) => {
+  const handleScannedCode = async (itemId, rawCode, silent = false) => {
     const code = parseCode(rawCode)
-    if (!code) return
+    if (!code) return false
+
+    // Debounce duplicate camera scans of the exact same code within 2.5 seconds
+    const now = Date.now()
+    if (scanCooldownRef.current.code === code && now - scanCooldownRef.current.time < 2500) {
+      return false
+    }
+
+    // Check if code is already assigned to ANY item in the current review modal
+    const isAlreadyAssignedInModal = approval.items.some(i => (i.asset_codes || []).includes(code))
+    if (isAlreadyAssignedInModal) {
+      scanCooldownRef.current = { code, time: now }
+      toast.error(`Asset code ${code} is already assigned in this request.`)
+      return false
+    }
+
+    // Real-time backend check: verify if the product is already in use
+    try {
+      const { data: asset } = await api.get(`/api/assets/by-code/${encodeURIComponent(code)}`)
+      if (asset) {
+        if (asset.status === 'in_use') {
+          scanCooldownRef.current = { code, time: now }
+          toast.error(`⚠️ Product "${asset.name}" (${code}) is ALREADY IN USE! Cannot allocate.`, {
+            duration: 5000,
+            icon: '🚫'
+          })
+          return false
+        }
+        if (asset.status === 'maintenance') {
+          scanCooldownRef.current = { code, time: now }
+          toast.error(`⚠️ Product "${asset.name}" (${code}) is under maintenance! Cannot allocate.`, {
+            duration: 5000,
+            icon: '🛠️'
+          })
+          return false
+        }
+        if (asset.status === 'retired') {
+          scanCooldownRef.current = { code, time: now }
+          toast.error(`⚠️ Product "${asset.name}" (${code}) is decommissioned / retired!`, {
+            duration: 5000,
+            icon: '❌'
+          })
+          return false
+        }
+      }
+    } catch (err) {
+      // 404 is allowed (brand new / unregistered asset code auto-registers upon approval)
+      if (err.response?.status !== 404) {
+        console.warn('Asset lookup warning:', err)
+      }
+    }
+
+    scanCooldownRef.current = { code, time: now }
 
     setApproval(prev => {
       const targetItem = prev.items.find(i => i.request_item_id === itemId)
@@ -136,20 +189,24 @@ export default function RequestsAdmin() {
 
       const currentCodes = targetItem.asset_codes || []
       if (currentCodes.includes(code)) {
-        return prev // Prevent duplicate scan spam
+        return prev
       }
 
-      if (!silent) {
-        toast.success(`Scanned: ${code}`)
-      }
+      const newCodes = [...currentCodes, code]
       return {
         ...prev,
         items: prev.items.map(i => i.request_item_id === itemId ? {
           ...i,
-          asset_codes: [...currentCodes, code]
+          asset_codes: newCodes,
+          quantity_approved: newCodes.length
         } : i)
       }
     })
+
+    if (!silent) {
+      toast.success(`Scanned: ${code}`)
+    }
+    return true
   }
 
   const handleFilesUpload = async (itemId, fileList) => {
@@ -169,8 +226,10 @@ export default function RequestsAdmin() {
         if (decodedText) {
           const code = parseCode(decodedText)
           if (code) {
-            handleScannedCode(itemId, code, true)
-            addedCodes.push(code)
+            const added = await handleScannedCode(itemId, code, true)
+            if (added) {
+              addedCodes.push(code)
+            }
           }
         }
         try {
@@ -189,46 +248,33 @@ export default function RequestsAdmin() {
         { id: toastId }
       )
     } else {
-      toast.error('Could not detect a valid QR code in the selected file(s). Please ensure image is clear.', { id: toastId })
+      toast.error('No valid available QR codes could be added from the selected file(s).', { id: toastId })
     }
   }
 
-  const addManualCode = (itemId) => {
+  const addManualCode = async (itemId) => {
     const raw = manualInputs[itemId]
     if (!raw) return
     const code = parseCode(raw)
     if (!code) return
-
-    setApproval(prev => {
-      const targetItem = prev.items.find(i => i.request_item_id === itemId)
-      if (!targetItem) return prev
-
-      const currentCodes = targetItem.asset_codes || []
-      if (currentCodes.includes(code)) {
-        toast.error(`Code ${code} already added`)
-        return prev
-      }
-
-      toast.success(`Added: ${code}`)
-      return {
-        ...prev,
-        items: prev.items.map(i => i.request_item_id === itemId ? {
-          ...i,
-          asset_codes: [...currentCodes, code]
-        } : i)
-      }
-    })
-
-    setManualInputs(prev => ({ ...prev, [itemId]: '' }))
+    const success = await handleScannedCode(itemId, code)
+    if (success) {
+      setManualInputs(prev => ({ ...prev, [itemId]: '' }))
+    }
   }
 
   const removeCode = (itemId, codeToRemove) => {
     setApproval(prev => ({
       ...prev,
-      items: prev.items.map(i => i.request_item_id === itemId ? {
-        ...i,
-        asset_codes: (i.asset_codes || []).filter(c => c !== codeToRemove)
-      } : i)
+      items: prev.items.map(i => {
+        if (i.request_item_id !== itemId) return i
+        const newCodes = (i.asset_codes || []).filter(c => c !== codeToRemove)
+        return {
+          ...i,
+          asset_codes: newCodes,
+          quantity_approved: newCodes.length
+        }
+      })
     }))
   }
 
@@ -240,37 +286,94 @@ export default function RequestsAdmin() {
   }
 
   const handleApprove = async () => {
-    // Verification check warning admins if they attempt to approve without scanning/assigning QR codes
-    if (approval.status === 'approved' || approval.status === 'partially_approved') {
-      const itemsMissingCodes = approval.items.filter(i => {
-        return (i.quantity_approved > 0) && (!i.asset_codes || i.asset_codes.length === 0)
-      })
-
-      if (itemsMissingCodes.length > 0) {
-        const itemNames = itemsMissingCodes.map(i => {
-          const reqItem = selected.items.find(x => x.id === i.request_item_id)
-          return reqItem ? `• ${reqItem.item_name} (Approved: ${i.quantity_approved})` : ''
-        }).filter(Boolean).join('\n')
-
-        const confirmed = window.confirm(
-          `⚠️ WARNING: QR Codes Not Assigned!\n\n` +
-          `You have not scanned or assigned QR asset codes for the following approved item(s):\n${itemNames}\n\n` +
-          `Items approved without QR codes will not automatically link to physical inventory or generate active allocations.\n\n` +
-          `Do you want to proceed anyway?`
-        )
-        if (!confirmed) return
+    if (approval.status === 'rejected') {
+      try {
+        setLoading(true)
+        await api.put(`/api/requests/${selected.id}/review`, {
+          status: 'rejected',
+          admin_notes: approval.admin_notes,
+          items: approval.items.map(i => ({
+            request_item_id: i.request_item_id,
+            quantity_approved: 0,
+            asset_codes: []
+          }))
+        })
+        toast.success('Request rejected')
+        qc.invalidateQueries({ queryKey: ['admin-requests'] })
+        qc.invalidateQueries({ queryKey: ['assets'] })
+        closeModal()
+      } catch (err) {
+        toast.error(err.response?.data?.detail || 'Failed to reject request')
+      } finally {
+        setLoading(false)
       }
+      return
     }
 
-    setLoading(true)
+    // Separate scanned vs unscanned items
+    const scannedItems = approval.items.filter(i => (i.asset_codes?.length || 0) > 0)
+    const unscannedItems = approval.items.filter(i => (!i.asset_codes || i.asset_codes.length === 0))
+
+    if (scannedItems.length === 0) {
+      const confirmReject = window.confirm(
+        `⚠️ No QR codes were scanned for any items in this request.\n\n` +
+        `All requested items will be DECLINED and the request will be REJECTED.\n\n` +
+        `Do you want to proceed?`
+      )
+      if (!confirmReject) return
+    } else if (unscannedItems.length > 0) {
+      const unscannedNames = unscannedItems.map(i => {
+        const orig = selected.items.find(x => x.id === i.request_item_id)
+        return `• ${orig?.item_name || 'Item'} (${orig?.quantity_requested || 1} requested)`
+      }).join('\n')
+
+      const confirmPartial = window.confirm(
+        `⚠️ Partial Approval Notice:\n\n` +
+        `QR codes were NOT scanned for the following item(s):\n${unscannedNames}\n\n` +
+        `These unscanned items will be DECLINED (Approved: 0).\n` +
+        `Only the scanned items will be approved and allocated.\n\n` +
+        `Do you want to submit this decision?`
+      )
+      if (!confirmPartial) return
+    }
+
+    // Determine target status
+    let submitStatus = 'approved'
+    if (scannedItems.length === 0) {
+      submitStatus = 'rejected'
+    } else {
+      const isFullySatisfied = approval.items.every(i => {
+        const orig = selected.items.find(x => x.id === i.request_item_id)
+        return (i.asset_codes?.length || 0) >= (orig?.quantity_requested || 1)
+      })
+      submitStatus = isFullySatisfied ? 'approved' : 'partially_approved'
+    }
+
     try {
-      await api.put(`/api/requests/${selected.id}/review`, approval)
-      toast.success(`Request ${approval.status}!`)
+      setLoading(true)
+      await api.put(`/api/requests/${selected.id}/review`, {
+        status: submitStatus,
+        admin_notes: approval.admin_notes,
+        items: approval.items.map(i => ({
+          request_item_id: i.request_item_id,
+          quantity_approved: i.asset_codes?.length || 0,
+          asset_codes: i.asset_codes || []
+        }))
+      })
+
+      if (submitStatus === 'approved') {
+        toast.success('Request fully approved & assets allocated!')
+      } else if (submitStatus === 'partially_approved') {
+        toast.success('Request partially approved. Unscanned items were declined.')
+      } else {
+        toast.success('Request rejected (no QR codes scanned).')
+      }
+
+      qc.invalidateQueries({ queryKey: ['admin-requests'] })
+      qc.invalidateQueries({ queryKey: ['assets'] })
       closeModal()
-      qc.invalidateQueries(['admin-requests'])
-      qc.invalidateQueries(['assets'])
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed')
+      toast.error(err.response?.data?.detail || 'Failed to submit review')
     } finally {
       setLoading(false)
     }
@@ -356,41 +459,58 @@ export default function RequestsAdmin() {
                 <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                   {selected.items.map(item => {
                     const approvalItem = approval.items.find(i => i.request_item_id === item.id)
-                    const approvedQty = approvalItem?.quantity_approved ?? item.quantity_requested
                     const assignedCodes = approvalItem?.asset_codes || []
+                    const approvedQty = approvalItem?.quantity_approved ?? assignedCodes.length
                     const isScanning = scanningItemId === item.id
+                    const isDeclined = assignedCodes.length === 0
+                    const isPartial = assignedCodes.length > 0 && assignedCodes.length < item.quantity_requested
+                    const isComplete = assignedCodes.length >= item.quantity_requested
 
                     return (
                       <div key={item.id} style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                         {/* Item Summary Row */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: 200 }}>
                             <div style={{ fontWeight: 600, fontSize: 14 }}>{item.item_name}</div>
                             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                               {item.category}{item.notes ? ` · ${item.notes}` : ''}
                             </div>
                             {item.is_other && <span className="badge badge-warning" style={{ fontSize: 10, marginTop: 4 }}>Custom item</span>}
                           </div>
-                          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                            Requested: <strong>{item.quantity_requested}</strong>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>Approve:</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={item.quantity_requested}
-                              className="form-input"
-                              style={{ width: 70 }}
-                              value={approvedQty}
-                              disabled={selected.status !== 'pending'}
-                              onChange={e => updateItemQty(item.id, parseInt(e.target.value))}
-                            />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                              Requested: <strong>{item.quantity_requested}</strong>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>Approved:</span>
+                              <strong style={{
+                                fontSize: 14,
+                                padding: '3px 10px',
+                                borderRadius: 6,
+                                background: isComplete ? 'rgba(16, 185, 129, 0.15)' : isPartial ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                color: isComplete ? 'var(--success)' : isPartial ? 'var(--warning)' : 'var(--error)'
+                              }}>
+                                {approvedQty}
+                              </strong>
+                            </div>
+                            <div>
+                              {isComplete && (
+                                <span className="badge badge-success" style={{ fontSize: 11 }}>✅ Fully Approved ({approvedQty}/{item.quantity_requested})</span>
+                              )}
+                              {isPartial && (
+                                <span className="badge badge-warning" style={{ fontSize: 11 }}>⚠️ Partially Scanned ({approvedQty}/{item.quantity_requested})</span>
+                              )}
+                              {isDeclined && (
+                                <span className="badge badge-error" style={{ fontSize: 11, background: 'rgba(239, 68, 68, 0.15)', color: 'var(--error)' }}>
+                                  ❌ Declined (Unscanned)
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
                         {/* Dedicated "📷 Product QR Code" Section */}
-                        {selected.status === 'pending' && (approval.status === 'approved' || approval.status === 'partially_approved') && approvedQty > 0 && (
+                        {selected.status === 'pending' && approval.status !== 'rejected' && (
                           <div
                             onDragOver={e => e.preventDefault()}
                             onDrop={e => {
@@ -404,7 +524,7 @@ export default function RequestsAdmin() {
                               padding: '12px 14px',
                               background: 'var(--surface-2)',
                               borderRadius: 8,
-                              border: '1px solid var(--border)'
+                              border: isDeclined ? '1px dashed rgba(239, 68, 68, 0.4)' : '1px solid var(--border)'
                             }}
                           >
                             {/* Section Header */}
@@ -424,10 +544,10 @@ export default function RequestsAdmin() {
                                   fontWeight: 600,
                                   padding: '2px 8px',
                                   borderRadius: 12,
-                                  background: assignedCodes.length >= approvedQty ? 'rgba(16, 185, 129, 0.15)' : 'rgba(234, 179, 8, 0.15)',
-                                  color: assignedCodes.length >= approvedQty ? 'var(--success)' : 'var(--warning)'
+                                  background: assignedCodes.length >= item.quantity_requested ? 'rgba(16, 185, 129, 0.15)' : assignedCodes.length > 0 ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                  color: assignedCodes.length >= item.quantity_requested ? 'var(--success)' : assignedCodes.length > 0 ? 'var(--warning)' : 'var(--error)'
                                 }}>
-                                  {assignedCodes.length} of {approvedQty} assigned
+                                  {assignedCodes.length} of {item.quantity_requested} assigned
                                 </span>
                               </div>
 
@@ -592,9 +712,8 @@ export default function RequestsAdmin() {
                         value={approval.status}
                         onChange={e => setApproval(a => ({ ...a, status: e.target.value }))}
                       >
-                        <option value="approved">✅ Approve</option>
-                        <option value="partially_approved">⚠️ Partially Approve</option>
-                        <option value="rejected">❌ Reject</option>
+                        <option value="approved">✅ Allocate Scanned Items (Decline Unscanned)</option>
+                        <option value="rejected">❌ Reject Entire Request</option>
                       </select>
                     </div>
                   </div>

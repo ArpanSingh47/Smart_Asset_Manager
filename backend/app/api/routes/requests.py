@@ -153,23 +153,52 @@ def review_request(
     if req.status not in [RequestStatus.pending]:
         raise HTTPException(status_code=400, detail="Request already processed")
 
-    req.status = RequestStatus(approval.status)
     req.admin_notes = approval.admin_notes
     allocated_summary_list = []
+    declined_summary_list = []
 
-    # Update item quantities and process scanned asset codes
-    for item_approval in approval.items:
-        ri = db.query(RequestItem).filter(RequestItem.id == item_approval.request_item_id).first()
-        if ri:
-            ri.quantity_approved = item_approval.quantity_approved
+    # If the admin chose rejected directly:
+    if approval.status == "rejected":
+        req.status = RequestStatus.rejected
+        for item_approval in approval.items:
+            ri = db.query(RequestItem).filter(RequestItem.id == item_approval.request_item_id).first()
+            if ri:
+                ri.quantity_approved = 0
+                declined_summary_list.append(f"{ri.item_name} ({ri.quantity_requested})")
+    else:
+        # Process each item: only items with scanned QR codes are approved!
+        for item_approval in approval.items:
+            ri = db.query(RequestItem).filter(RequestItem.id == item_approval.request_item_id).first()
+            scanned_codes = [c.strip() for c in (item_approval.asset_codes or []) if c.strip()]
 
-        # Process each scanned QR asset code for this approved item
-        if approval.status in ["approved", "partially_approved"] and item_approval.asset_codes:
-            for code_raw in item_approval.asset_codes:
-                code = code_raw.strip()
-                if not code:
-                    continue
+            # If no QR codes were scanned for this item -> decline it
+            if not scanned_codes:
+                if ri:
+                    ri.quantity_approved = 0
+                    declined_summary_list.append(f"{ri.item_name} ({ri.quantity_requested} requested)")
+                continue
 
+            # First, validate that none of the scanned codes are already in_use elsewhere
+            for code in scanned_codes:
+                existing_asset = db.query(Asset).filter(Asset.asset_code == code).first()
+                if existing_asset and existing_asset.status == AssetStatus.in_use:
+                    existing_alloc = db.query(Allocation).filter(
+                        Allocation.request_id == req.id,
+                        Allocation.asset_id == existing_asset.id
+                    ).first()
+                    if not existing_alloc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Product '{existing_asset.name}' ({existing_asset.asset_code}) is already in use and cannot be allocated."
+                        )
+
+            # Set quantity approved strictly to number of scanned codes (up to quantity_requested)
+            if ri:
+                ri.quantity_approved = len(scanned_codes)
+                if len(scanned_codes) < ri.quantity_requested:
+                    declined_summary_list.append(f"{ri.quantity_requested - len(scanned_codes)}x {ri.item_name}")
+
+            for code in scanned_codes:
                 # Find or register asset so it appears in the assets page
                 asset = db.query(Asset).filter(Asset.asset_code == code).first()
                 if not asset:
@@ -229,24 +258,36 @@ def review_request(
                 db.add(_log_alloc)
                 allocated_summary_list.append(f"{asset.name} ({asset.asset_code})")
 
+        # Determine overall request status based on scanned vs requested units
+        total_requested = sum(i.quantity_requested for i in req.items)
+        total_approved = sum((i.quantity_approved or 0) for i in req.items)
+
+        if total_approved == 0:
+            req.status = RequestStatus.rejected
+        elif total_approved < total_requested:
+            req.status = RequestStatus.partially_approved
+        else:
+            req.status = RequestStatus.approved
+
     # Notify user with full allocation details
     user = db.query(User).filter(User.id == req.user_id).first()
-    alloc_details = f" Allocated items: {', '.join(allocated_summary_list)}." if allocated_summary_list else ""
+    alloc_details = f" Allocated: {', '.join(allocated_summary_list)}." if allocated_summary_list else ""
+    declined_details = f" Declined (not scanned): {', '.join(declined_summary_list)}." if declined_summary_list else ""
     n = Notification(
         user_id=user.id,
-        title=f"Request {approval.status.title()}",
-        message=f"Your request for '{req.event_name}' has been {approval.status}.{alloc_details} {approval.admin_notes or ''}".strip(),
-        type="success" if approval.status == "approved" else "error" if approval.status == "rejected" else "warning"
+        title=f"Request {req.status.value.replace('_', ' ').title()}",
+        message=f"Your request for '{req.event_name}' has been {req.status.value.replace('_', ' ')}.{alloc_details}{declined_details} {approval.admin_notes or ''}".strip(),
+        type="success" if req.status == RequestStatus.approved else "error" if req.status == RequestStatus.rejected else "warning"
     )
     db.add(n)
-    log = AuditLog(action=f"request_{approval.status}", performed_by=admin.id,
+    log = AuditLog(action=f"request_{req.status.value}", performed_by=admin.id,
                    entity_type="request", entity_id=req.id)
     db.add(log)
     db.commit()
 
     bg.add_task(send_request_status_email, user.email, user.name, req.id,
-                approval.status, req.event_name, approval.admin_notes)
-    return {"message": f"Request {approval.status}"}
+                req.status.value, req.event_name, approval.admin_notes)
+    return {"message": f"Request {req.status.value}"}
 
 
 def _req_dict(r: Request, db: Session):
